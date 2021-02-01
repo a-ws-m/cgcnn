@@ -6,6 +6,9 @@ import json
 import os
 import random
 import warnings
+from operator import itemgetter
+from pathlib import Path
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
 import numpy as np
 import torch
@@ -14,11 +17,24 @@ from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.dataloader import default_collate
 from torch.utils.data.sampler import SubsetRandomSampler
 
+try:
+    from tqdm import tqdm
+except ImportError:
+    pass
 
-def get_train_val_test_loader(dataset, collate_fn=default_collate,
-                              batch_size=64, train_ratio=None,
-                              val_ratio=0.1, test_ratio=0.1, return_test=False,
-                              num_workers=1, pin_memory=False, **kwargs):
+
+def get_train_val_test_loader(
+    dataset,
+    collate_fn=default_collate,
+    batch_size=64,
+    train_ratio=None,
+    val_ratio=0.1,
+    test_ratio=0.1,
+    return_test=False,
+    num_workers=1,
+    pin_memory=False,
+    **kwargs,
+):
     """
     Utility function for dividing a dataset to train, val, test datasets.
 
@@ -53,40 +69,51 @@ def get_train_val_test_loader(dataset, collate_fn=default_collate,
     if train_ratio is None:
         assert val_ratio + test_ratio < 1
         train_ratio = 1 - val_ratio - test_ratio
-        print('[Warning] train_ratio is None, using all training data.')
+        print("[Warning] train_ratio is None, using all training data.")
     else:
         assert train_ratio + val_ratio + test_ratio <= 1
     indices = list(range(total_size))
-    if kwargs['train_size']:
-        train_size = kwargs['train_size']
+    if kwargs["train_size"]:
+        train_size = kwargs["train_size"]
     else:
         train_size = int(train_ratio * total_size)
-    if kwargs['test_size']:
-        test_size = kwargs['test_size']
+    if kwargs["test_size"]:
+        test_size = kwargs["test_size"]
     else:
         test_size = int(test_ratio * total_size)
-    if kwargs['val_size']:
-        valid_size = kwargs['val_size']
+    if kwargs["val_size"]:
+        valid_size = kwargs["val_size"]
     else:
         valid_size = int(val_ratio * total_size)
     train_sampler = SubsetRandomSampler(indices[:train_size])
-    val_sampler = SubsetRandomSampler(
-        indices[-(valid_size + test_size):-test_size])
+    val_sampler = SubsetRandomSampler(indices[-(valid_size + test_size) : -test_size])
     if return_test:
         test_sampler = SubsetRandomSampler(indices[-test_size:])
-    train_loader = DataLoader(dataset, batch_size=batch_size,
-                              sampler=train_sampler,
-                              num_workers=num_workers,
-                              collate_fn=collate_fn, pin_memory=pin_memory)
-    val_loader = DataLoader(dataset, batch_size=batch_size,
-                            sampler=val_sampler,
-                            num_workers=num_workers,
-                            collate_fn=collate_fn, pin_memory=pin_memory)
+    train_loader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        sampler=train_sampler,
+        num_workers=num_workers,
+        collate_fn=collate_fn,
+        pin_memory=pin_memory,
+    )
+    val_loader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        sampler=val_sampler,
+        num_workers=num_workers,
+        collate_fn=collate_fn,
+        pin_memory=pin_memory,
+    )
     if return_test:
-        test_loader = DataLoader(dataset, batch_size=batch_size,
-                                 sampler=test_sampler,
-                                 num_workers=num_workers,
-                                 collate_fn=collate_fn, pin_memory=pin_memory)
+        test_loader = DataLoader(
+            dataset,
+            batch_size=batch_size,
+            sampler=test_sampler,
+            num_workers=num_workers,
+            collate_fn=collate_fn,
+            pin_memory=pin_memory,
+        )
     if return_test:
         return train_loader, val_loader, test_loader
     else:
@@ -130,23 +157,28 @@ def collate_pool(dataset_list):
     crystal_atom_idx, batch_target = [], []
     batch_cif_ids = []
     base_idx = 0
-    for i, ((atom_fea, nbr_fea, nbr_fea_idx), target, cif_id)\
-            in enumerate(dataset_list):
+    for i, ((atom_fea, nbr_fea, nbr_fea_idx), target, cif_id) in enumerate(
+        dataset_list
+    ):
         n_i = atom_fea.shape[0]  # number of atoms for this crystal
         batch_atom_fea.append(atom_fea)
         batch_nbr_fea.append(nbr_fea)
-        batch_nbr_fea_idx.append(nbr_fea_idx+base_idx)
-        new_idx = torch.LongTensor(np.arange(n_i)+base_idx)
+        batch_nbr_fea_idx.append(nbr_fea_idx + base_idx)
+        new_idx = torch.LongTensor(np.arange(n_i) + base_idx)
         crystal_atom_idx.append(new_idx)
         batch_target.append(target)
         batch_cif_ids.append(cif_id)
         base_idx += n_i
-    return (torch.cat(batch_atom_fea, dim=0),
+    return (
+        (
+            torch.cat(batch_atom_fea, dim=0),
             torch.cat(batch_nbr_fea, dim=0),
             torch.cat(batch_nbr_fea_idx, dim=0),
-            crystal_atom_idx),\
-        torch.stack(batch_target, dim=0),\
-        batch_cif_ids
+            crystal_atom_idx,
+        ),
+        torch.stack(batch_target, dim=0),
+        batch_cif_ids,
+    )
 
 
 class GaussianDistance(object):
@@ -155,6 +187,7 @@ class GaussianDistance(object):
 
     Unit: angstrom
     """
+
     def __init__(self, dmin, dmax, step, var=None):
         """
         Parameters
@@ -169,7 +202,7 @@ class GaussianDistance(object):
         """
         assert dmin < dmax
         assert dmax - dmin > step
-        self.filter = np.arange(dmin, dmax+step, step)
+        self.filter = np.arange(dmin, dmax + step, step)
         if var is None:
             var = step
         self.var = var
@@ -190,8 +223,9 @@ class GaussianDistance(object):
           Expanded distance matrix with the last dimension of length
           len(self.filter)
         """
-        return np.exp(-(distances[..., np.newaxis] - self.filter)**2 /
-                      self.var**2)
+        return np.exp(
+            -((distances[..., np.newaxis] - self.filter) ** 2) / self.var ** 2
+        )
 
 
 class AtomInitializer(object):
@@ -200,6 +234,7 @@ class AtomInitializer(object):
 
     !!! Use one AtomInitializer per dataset !!!
     """
+
     def __init__(self, atom_types):
         self.atom_types = set(atom_types)
         self._embedding = {}
@@ -211,16 +246,18 @@ class AtomInitializer(object):
     def load_state_dict(self, state_dict):
         self._embedding = state_dict
         self.atom_types = set(self._embedding.keys())
-        self._decodedict = {idx: atom_type for atom_type, idx in
-                            self._embedding.items()}
+        self._decodedict = {
+            idx: atom_type for atom_type, idx in self._embedding.items()
+        }
 
     def state_dict(self):
         return self._embedding
 
     def decode(self, idx):
-        if not hasattr(self, '_decodedict'):
-            self._decodedict = {idx: atom_type for atom_type, idx in
-                                self._embedding.items()}
+        if not hasattr(self, "_decodedict"):
+            self._decodedict = {
+                idx: atom_type for atom_type, idx in self._embedding.items()
+            }
         return self._decodedict[idx]
 
 
@@ -236,11 +273,11 @@ class AtomCustomJSONInitializer(AtomInitializer):
     elem_embedding_file: str
         The path to the .json file
     """
+
     def __init__(self, elem_embedding_file):
         with open(elem_embedding_file) as f:
             elem_embedding = json.load(f)
-        elem_embedding = {int(key): value for key, value
-                          in elem_embedding.items()}
+        elem_embedding = {int(key): value for key, value in elem_embedding.items()}
         atom_types = set(elem_embedding.keys())
         super(AtomCustomJSONInitializer, self).__init__(atom_types)
         for key, value in elem_embedding.items():
@@ -295,20 +332,22 @@ class CIFData(Dataset):
     target: torch.Tensor shape (1, )
     cif_id: str or int
     """
-    def __init__(self, root_dir, max_num_nbr=12, radius=8, dmin=0, step=0.2,
-                 random_seed=123):
+
+    def __init__(
+        self, root_dir, max_num_nbr=12, radius=8, dmin=0, step=0.2, random_seed=123
+    ):
         self.root_dir = root_dir
         self.max_num_nbr, self.radius = max_num_nbr, radius
-        assert os.path.exists(root_dir), 'root_dir does not exist!'
-        id_prop_file = os.path.join(self.root_dir, 'id_prop.csv')
-        assert os.path.exists(id_prop_file), 'id_prop.csv does not exist!'
+        assert os.path.exists(root_dir), "root_dir does not exist!"
+        id_prop_file = os.path.join(self.root_dir, "id_prop.csv")
+        assert os.path.exists(id_prop_file), "id_prop.csv does not exist!"
         with open(id_prop_file) as f:
             reader = csv.reader(f)
             self.id_prop_data = [row for row in reader]
         random.seed(random_seed)
         random.shuffle(self.id_prop_data)
-        atom_init_file = os.path.join(self.root_dir, 'atom_init.json')
-        assert os.path.exists(atom_init_file), 'atom_init.json does not exist!'
+        atom_init_file = os.path.join(self.root_dir, "atom_init.json")
+        assert os.path.exists(atom_init_file), "atom_init.json does not exist!"
         self.ari = AtomCustomJSONInitializer(atom_init_file)
         self.gdf = GaussianDistance(dmin=dmin, dmax=self.radius, step=step)
 
@@ -318,29 +357,34 @@ class CIFData(Dataset):
     @functools.lru_cache(maxsize=None)  # Cache loaded structures
     def __getitem__(self, idx):
         cif_id, target = self.id_prop_data[idx]
-        crystal = Structure.from_file(os.path.join(self.root_dir,
-                                                   cif_id+'.cif'))
-        atom_fea = np.vstack([self.ari.get_atom_fea(crystal[i].specie.number)
-                              for i in range(len(crystal))])
+        crystal = Structure.from_file(os.path.join(self.root_dir, cif_id + ".cif"))
+        atom_fea = np.vstack(
+            [
+                self.ari.get_atom_fea(crystal[i].specie.number)
+                for i in range(len(crystal))
+            ]
+        )
         atom_fea = torch.Tensor(atom_fea)
         all_nbrs = crystal.get_all_neighbors(self.radius, include_index=True)
         all_nbrs = [sorted(nbrs, key=lambda x: x[1]) for nbrs in all_nbrs]
         nbr_fea_idx, nbr_fea = [], []
         for nbr in all_nbrs:
             if len(nbr) < self.max_num_nbr:
-                warnings.warn('{} not find enough neighbors to build graph. '
-                              'If it happens frequently, consider increase '
-                              'radius.'.format(cif_id))
-                nbr_fea_idx.append(list(map(lambda x: x[2], nbr)) +
-                                   [0] * (self.max_num_nbr - len(nbr)))
-                nbr_fea.append(list(map(lambda x: x[1], nbr)) +
-                               [self.radius + 1.] * (self.max_num_nbr -
-                                                     len(nbr)))
+                warnings.warn(
+                    "{} not find enough neighbors to build graph. "
+                    "If it happens frequently, consider increase "
+                    "radius.".format(cif_id)
+                )
+                nbr_fea_idx.append(
+                    list(map(lambda x: x[2], nbr)) + [0] * (self.max_num_nbr - len(nbr))
+                )
+                nbr_fea.append(
+                    list(map(lambda x: x[1], nbr))
+                    + [self.radius + 1.0] * (self.max_num_nbr - len(nbr))
+                )
             else:
-                nbr_fea_idx.append(list(map(lambda x: x[2],
-                                            nbr[:self.max_num_nbr])))
-                nbr_fea.append(list(map(lambda x: x[1],
-                                        nbr[:self.max_num_nbr])))
+                nbr_fea_idx.append(list(map(lambda x: x[2], nbr[: self.max_num_nbr])))
+                nbr_fea.append(list(map(lambda x: x[1], nbr[: self.max_num_nbr])))
         nbr_fea_idx, nbr_fea = np.array(nbr_fea_idx), np.array(nbr_fea)
         nbr_fea = self.gdf.expand(nbr_fea)
         atom_fea = torch.Tensor(atom_fea)
@@ -348,3 +392,200 @@ class CIFData(Dataset):
         nbr_fea_idx = torch.LongTensor(nbr_fea_idx)
         target = torch.Tensor([float(target)])
         return (atom_fea, nbr_fea, nbr_fea_idx), target, cif_id
+
+
+class PyTorchStructure(NamedTuple):
+    """PyTorch-friendly Structure representation.
+
+    Usable by the CGCNN backend as a model input.
+
+    """
+
+    atomic_features: torch.Tensor
+    neighbour_features: torch.Tensor
+    neighbour_feature_indices: torch.LongTensor
+
+
+class CrystalData(Dataset):
+    """Dataset handler for in-memory structures and targets."""
+
+    def __init__(
+        self,
+        structures: List[Structure],
+        targets: Optional[List[float]] = None,
+        structure_ids: Optional[List[Any]] = None,
+        max_neighbours: int = 12,
+        cutoff_radius: float = 8.0,
+        min_distance: float = 0.0,
+        gaussian_step: float = 0.2,
+        random_seed: Optional[int] = None,
+        default_embeddings_file_path: Optional[Path] = None,
+    ) -> None:
+        self.max_neighbours = max_neighbours
+        self.cutoff_radius = cutoff_radius
+
+        # * Convert `None`s to default values
+        _targets: List[Optional[torch.Tensor]] = (
+            [None] * len(structures)
+            if targets is None
+            else [torch.Tensor(target) for target in targets]
+        )
+        _structure_ids: List[Any] = (
+            list(range(len(structures))) if structure_ids is None else structure_ids
+        )
+
+        # * Initialize mapping functions
+        self.gauss_distance = GaussianDistance(
+            dmin=min_distance, dmax=self.cutoff_radius, step=gaussian_step
+        )
+
+        self.embeddings_handler = DefaultAtomicEmbeddings(default_embeddings_file_path)
+
+        # * Convert pymatgen Structures to PyTorchStructures
+        try:
+            structure_iterator = tqdm(
+                zip(structures, _structure_ids),
+                "Featurising structures",
+                len(structures),
+            )
+        except NameError:
+            structure_iterator = zip(structures, _structure_ids)
+
+        torch_structures = [
+            self.convert_structure(structure, structure_id)
+            for structure, structure_id in structure_iterator
+        ]
+
+        # * Shuffle structures, targets and IDs
+        random.seed(random_seed)
+        data = list(zip(torch_structures, _targets, _structure_ids))
+        random.shuffle(data)
+        self.torch_structures, self.targets, self.structure_ids = zip(*data)
+
+        super().__init__()
+
+    def __len__(self) -> int:
+        """Get the length of our available data."""
+        return len(self.torch_structures)
+
+    def convert_structure(
+        self, structure: Structure, structure_id: Any
+    ) -> PyTorchStructure:
+        """Convert from pymatgen to PyTorch structure representations."""
+        atomic_features = np.vstack(
+            self.embeddings_handler[species.number] for species in structure
+        )
+
+        all_neighbours = structure.get_all_neighbors(
+            self.cutoff_radius, include_index=True
+        )
+
+        neighbour_feature_indices = []
+        neighbour_features = []
+        for neighbour in all_neighbours:
+            neighbour.sort(key=itemgetter(1))
+
+            if len(neighbour) < self.max_neighbours:
+                warnings.warn(
+                    f"Structure with ID {structure_id}"
+                    " does not have enough neighbours to build a graph."
+                    " Consider increasing the cutoff radius."
+                )
+
+                # * Pad the neighbour features
+                neighbours_deficit = self.max_neighbours - len(neighbour)
+                neighbour_feature_index = (
+                    list(map(itemgetter(2), neighbour)) + [0] * neighbours_deficit
+                )
+                neighbour_feature = (
+                    list(map(itemgetter(1), neighbour))
+                    + [self.cutoff_radius + 1] * neighbours_deficit
+                )
+
+            else:
+                neighbour_feature_index = list(
+                    map(itemgetter(2), neighbour[: self.max_neighbours])
+                )
+                neighbour_feature = list(
+                    map(itemgetter(1), neighbour[: self.max_neighbours])
+                )
+
+            neighbour_feature_indices.append(neighbour_feature_index)
+            neighbour_features.append(neighbour_feature)
+
+        neighbour_feature_indices = np.array(neighbour_feature_indices)
+        neighbour_features = np.array(neighbour_features)
+
+        # Apply Gaussian distance function to neighbour features
+        neighbour_features = self.gauss_distance.expand(neighbour_features)
+
+        # Convert to Tensors
+        atomic_features_tensor = torch.Tensor(atomic_features)
+        neighbour_features_tensor = torch.Tensor(neighbour_features)
+        neighbour_feature_indices_tensor = torch.LongTensor(neighbour_feature_indices)
+
+        return PyTorchStructure(
+            atomic_features_tensor,
+            neighbour_features_tensor,
+            neighbour_feature_indices_tensor,
+        )
+
+    def __getitem__(
+        self, index: int
+    ) -> Tuple[PyTorchStructure, Optional[torch.Tensor], Any]:
+        """Sample the data at a given index.
+
+        Returns:
+            torch_structure: The PyTorch-compatible structure representation.
+            target: The value of the target, if known.
+            structure_id: The ID of the structure.
+
+        """
+        return (
+            self.torch_structures[index],
+            self.targets[index],
+            self.structure_ids[index],
+        )
+
+
+class DefaultAtomicEmbeddings:
+    """Default atomic embeddings container."""
+
+    def __init__(self, default_embed_path: Optional[Path] = None) -> None:
+        """Read default embeddings from disk.
+
+        Args:
+            default_embed_path: The path to the JSON file containing the
+                default atomic embeddings. Defaults to the correct relative
+                path for the cloned repo.
+
+        """
+        if default_embed_path is None:
+            default_embed_path = (
+                Path(__file__).parent.parent / "data" / "atom_init.json"
+            )
+        if not default_embed_path.exists():
+            raise FileNotFoundError(
+                f"Atomic embeddings file not found at {default_embed_path.absolute()}"
+            )
+
+        with default_embed_path.open("r") as f:
+            embeddings_buffer: Dict[str, List[int]] = json.load(f)
+
+        self.embeddings: List[np.ndarray] = [
+            np.array(embed_vector, dtype=float)
+            for embed_vector in embeddings_buffer.values()
+        ]
+
+    def __len__(self) -> int:
+        """Get number of atomic embeddings."""
+        return len(self.embeddings)
+
+    def __getitem__(self, atomic_num: int) -> np.ndarray:
+        """Get the embedding for an atom.
+
+        Args:
+            atomic_num: The atomic number of the atom.
+
+        """
+        return self.embeddings[atomic_num - 1]
