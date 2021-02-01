@@ -562,7 +562,10 @@ class DefaultAtomicEmbeddings:
         """
         if default_embed_path is None:
             default_embed_path = (
-                Path(__file__).parent.parent / "data" / "atom_init.json"
+                Path(__file__).parent.parent
+                / "data"
+                / "sample-regression"
+                / "atom_init.json"
             )
         if not default_embed_path.exists():
             raise FileNotFoundError(
