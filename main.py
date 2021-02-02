@@ -199,16 +199,15 @@ def get_data_loader(root_dir: Path) -> CrystalData:
     """Test for the in-memory data loader."""
     assert root_dir.exists()
 
-    cif_files = root_dir.glob("*.cif")
+    cif_files = list(root_dir.glob("*.cif"))
     id_property_file = root_dir / "id_prop.csv"
 
     structures = [Structure.from_file(cif_file) for cif_file in cif_files]
-    ids = [int(path.name.rstrip(".py")) for path in cif_files]
+    ids = [int(path.name.rstrip(".cif")) for path in cif_files]
 
-    id_properties = pd.read_csv(id_property_file, index_col=0)
-    properties = [id_properties[id] for id in ids]
+    id_properties = pd.read_csv(id_property_file, index_col=0, header=None)
+    properties = [float(id_properties.loc[id]) for id in ids]
 
-    print(f"{properties}")
     return CrystalData(structures, properties, ids)
 
 
