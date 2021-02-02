@@ -428,7 +428,7 @@ class CrystalData(Dataset):
         _targets: List[Optional[torch.Tensor]] = (
             [None] * len(structures)
             if targets is None
-            else [torch.Tensor(target) for target in targets]
+            else [torch.Tensor([target]) for target in targets]
         )
         _structure_ids: List[Any] = (
             list(range(len(structures))) if structure_ids is None else structure_ids
@@ -473,7 +473,7 @@ class CrystalData(Dataset):
     ) -> PyTorchStructure:
         """Convert from pymatgen to PyTorch structure representations."""
         atomic_features = np.vstack(
-            self.embeddings_handler[species.number] for species in structure
+            [self.embeddings_handler[site.specie.number] for site in structure]
         )
 
         all_neighbours = structure.get_all_neighbors(
